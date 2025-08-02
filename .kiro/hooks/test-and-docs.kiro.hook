@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "name": "Test & Documentation Update",
+  "description": "Automatically runs tests and updates documentation when JavaScript files or test files are saved",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.js",
+      "tests/*.js",
+      "*.test.js"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file has been saved. Please run the test suite using `npm test` to ensure all tests pass, then review and update any relevant documentation files (README.md, TESTING_GUIDE.md, CI_TESTING_STRATEGY.md) to reflect any changes in functionality or testing approach."
+  }
+}

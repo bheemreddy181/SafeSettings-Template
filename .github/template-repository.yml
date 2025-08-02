@@ -1,0 +1,22 @@
+# Template Repository Configuration
+# This file configures this repository as a GitHub template
+
+# Files to exclude when creating a new repository from this template
+exclude:
+  - coverage/
+  - node_modules/
+  - .DS_Store
+  - "._*"
+
+# Template metadata
+template:
+  name: "Safe Settings AWS Lambda Template"
+  description: "Production-ready template for deploying GitHub Safe Settings to AWS Lambda"
+  topics:
+    - github-app
+    - safe-settings
+    - aws-lambda
+    - docker
+    - serverless
+    - github-actions
+    - template

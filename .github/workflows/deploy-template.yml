@@ -1,0 +1,266 @@
+name: Deploy Safe Settings Docker Image
+
+# DEPLOYMENT TEMPLATE
+# This is a template workflow for deploying Safe Settings to AWS Lambda
+# 
+# SETUP INSTRUCTIONS:
+# 1. Copy this file and rename it (e.g., deploy-production.yml, deploy-staging.yml)
+# 2. Replace all placeholder values marked with YOUR_* with your actual values
+# 3. Configure GitHub repository secrets and variables:
+#    - Secrets: PRIVATE_KEY, SAFE_SETTINGS_GITHUB_CLIENT_SECRET
+#    - Variables: GH_ORG, APP_ID, WEBHOOK_SECRET, SAFE_SETTINGS_GITHUB_CLIENT_ID
+# 4. Set up AWS IAM role with appropriate permissions for ECR and Lambda
+# 5. Create GitHub environment (e.g., "production") with protection rules if needed
+#
+# REQUIRED REPLACEMENTS:
+# - YOUR_ACCOUNT_ID: AWS Account ID (e.g., 123456789012)
+# - YOUR_REGION: AWS Region (e.g., us-east-1)
+# - YOUR_ECR_REPOSITORY_NAME: ECR repository name
+# - YOUR_DEPLOY_ROLE: IAM role name for deployment
+# - YOUR_WEBHOOKS_FUNCTION_NAME: Lambda function name for webhooks
+# - YOUR_SCHEDULER_FUNCTION_NAME: Lambda function name for scheduler
+
+on:
+  # push:
+  #   branches: ['master', 'main']
+  #   paths-ignore:
+  #     - '*.md'
+  #     - 'docs/**'
+  #     - '.github/workflows/test.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_push_docker:
+    runs-on: ubuntu-latest
+    environment: production  # Change to your environment name
+    env:
+      ECR_ADDRESS: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com
+      ECR_REPOSITORY: YOUR_ECR_REPOSITORY_NAME
+      ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_DEPLOY_ROLE
+      AWS_ACCOUNT_ID: "YOUR_ACCOUNT_ID"
+      AWS_REGION: YOUR_AWS_REGION
+      
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: safe_settings_docker_deploy_session
+          role-duration-seconds: 1200
+          role-skip-session-tagging: true
+
+      - name: Login to ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ECR_ADDRESS }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ECR_ADDRESS }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Verify ECR images
+        run: |
+          echo "🔍 Verifying images in ECR repository..."
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --query 'imageDetails[*].[imageTags[0],imageDigest,imagePushedAt]' \
+            --output table
+
+      - name: Output deployment info
+        run: |
+          echo "🚀 Docker images deployed successfully!"
+          echo ""
+          echo "📋 Generated tags:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "🏷️ Image digest: ${{ steps.meta.outputs.digest }}"
+          echo ""
+
+  deploy_lambda_functions:
+    runs-on: ubuntu-latest
+    needs: build_and_push_docker
+    environment: production  # Change to your environment name
+    env:
+      ECR_ADDRESS: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com
+      ECR_REPOSITORY: YOUR_ECR_REPOSITORY_NAME
+      LAMBDA_FUNCTION_NAME: YOUR_WEBHOOKS_FUNCTION_NAME
+      ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_DEPLOY_ROLE
+      AWS_REGION: YOUR_AWS_REGION
+      
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: safe_settings_lambda_session
+          role-duration-seconds: 1200
+          role-skip-session-tagging: true
+
+      - name: Update Lambda function code
+        run: |
+          IMAGE_URI="${{ env.ECR_ADDRESS }}/${{ env.ECR_REPOSITORY }}:latest"
+          echo "🔄 Updating Lambda function with latest image..."
+          echo "🎯 Using latest image: ${IMAGE_URI}"
+          
+          # Update the function code (image URI)
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --image-uri ${IMAGE_URI}
+
+      - name: Wait for code update to complete
+        run: |
+          # Wait for code update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+      - name: Update Lambda environment variables
+        run: |
+          echo "🔧 Updating Lambda environment variables..."
+          cat > env-vars.json << EOF
+          {
+            "Variables": {
+              "GH_ORG": "${{ vars.GH_ORG }}",
+              "APP_ID": "${{ vars.APP_ID }}",
+              "PRIVATE_KEY": "${{ secrets.PRIVATE_KEY }}",
+              "WEBHOOK_SECRET": "${{ vars.WEBHOOK_SECRET }}",
+              "GITHUB_CLIENT_ID": "${{ vars.SAFE_SETTINGS_GITHUB_CLIENT_ID }}",
+              "GITHUB_CLIENT_SECRET": "${{ secrets.SAFE_SETTINGS_GITHUB_CLIENT_SECRET }}",
+              "NODE_ENV": "production",
+              "LOG_LEVEL": "info"
+            }
+          }
+          EOF
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --environment file://env-vars.json
+          
+          rm env-vars.json
+
+      - name: Wait for configuration update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+      - name: Update Lambda function handler
+        run: |
+          # Update the function configuration (handler)
+          echo "🎯 Setting handler: safe-settings-handler.webhooks"
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --image-config '{"Command":["safe-settings-handler.webhooks"]}'
+
+      - name: Wait for handler configuration update
+        run: |
+          # wait for handler configuration update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+
+  update_scheduler:
+    runs-on: ubuntu-latest
+    needs: deploy_lambda_functions
+    environment: production  # Change to your environment name
+    env:
+      ECR_ADDRESS: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com
+      ECR_REPOSITORY: YOUR_ECR_REPOSITORY_NAME
+      SCHEDULER_FUNCTION_NAME: YOUR_SCHEDULER_FUNCTION_NAME
+      ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_DEPLOY_ROLE
+      AWS_REGION: YOUR_AWS_REGION
+      
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-session-name: safe_settings_scheduler_session
+          role-duration-seconds: 1200
+          role-skip-session-tagging: true
+
+      - name: Update scheduler function code
+        run: |
+          IMAGE_URI="${{ env.ECR_ADDRESS }}/${{ env.ECR_REPOSITORY }}:latest"
+          echo "🔄 Updating scheduler Lambda function with latest image..."
+          echo "🎯 Using latest image: ${IMAGE_URI}"
+          
+          # Update the function code (image URI)
+          aws lambda update-function-code \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }} \
+            --image-uri ${IMAGE_URI}
+
+      - name: Wait for scheduler code update to complete
+        run: |
+          # Wait for code update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }}
+
+      - name: Update scheduler function handler
+        run: |
+          # Update the function configuration (handler)
+          echo "🎯 Setting handler: safe-settings-handler.scheduler"
+          aws lambda update-function-configuration \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }} \
+            --image-config '{"Command":["safe-settings-handler.scheduler"]}'
+
+      - name: Wait for scheduler handler configuration update
+        run: |
+          # Wait for configuration update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }}
+
+      - name: Update scheduler environment variables
+        run: |
+          echo "🔧 Updating scheduler Lambda environment variables..."
+          cat > scheduler-env-vars.json << EOF
+          {
+            "Variables": {
+              "GH_ORG": "${{ vars.GH_ORG }}",
+              "APP_ID": "${{ vars.APP_ID }}",
+              "PRIVATE_KEY": "${{ secrets.PRIVATE_KEY }}",
+              "WEBHOOK_SECRET": "${{ vars.WEBHOOK_SECRET }}",
+              "GITHUB_CLIENT_ID": "${{ vars.SAFE_SETTINGS_GITHUB_CLIENT_ID }}",
+              "GITHUB_CLIENT_SECRET": "${{ secrets.SAFE_SETTINGS_GITHUB_CLIENT_SECRET }}",
+              "NODE_ENV": "production",
+              "LOG_LEVEL": "info"
+            }
+          }
+          EOF
+          aws lambda update-function-configuration \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }} \
+            --environment file://scheduler-env-vars.json
+          
+          rm scheduler-env-vars.json
+
+      - name: Wait for scheduler configuration update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ env.SCHEDULER_FUNCTION_NAME }}
+          
+          echo "✅ Scheduler function updated successfully!"
+

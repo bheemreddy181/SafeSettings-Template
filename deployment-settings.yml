@@ -1,0 +1,74 @@
+# Safe Settings Deployment Configuration
+# =======================================
+# This file controls which repositories safe-settings manages and defines
+# validation rules for configuration changes.
+#
+# Copy this file to deployment-settings.yml and customize for your organization.
+# The Dockerfile will automatically include it in the Lambda container.
+#
+# Documentation: https://github.com/github/safe-settings
+
+# Repository Restrictions
+# -----------------------
+# Control which repositories safe-settings manages.
+# If no file is specified, these repositories are excluded by default:
+#   - admin
+#   - .github
+#   - safe-settings
+#
+# You can use glob patterns for matching:
+#   - '*' matches any string (e.g., 'test-*' matches 'test-api', 'test-web')
+#   - Exact names match specific repositories
+
+restrictedRepos:
+  # Repositories to exclude from safe-settings management
+  exclude:
+    - admin
+    - .github
+    - safe-settings
+    # Add patterns to exclude groups of repos:
+    # - archived-*
+    # - deprecated-*
+
+  # Repositories to explicitly include (optional)
+  # If specified, ONLY these repositories will be managed
+  # include:
+  #   - api
+  #   - web
+  #   - core-*
+
+# Configuration Validators
+# ------------------------
+# Custom validation rules that run BEFORE applying settings.
+# Return true to allow the configuration, false to reject it.
+#
+# Available variables in scripts:
+#   - baseconfig: The current configuration being validated
+
+# configvalidators:
+#   - plugin: collaborators
+#     error: |
+#       `Admin permission cannot be assigned to collaborators`
+#     script: |
+#       return baseconfig.permission != 'admin'
+
+# Override Validators
+# -------------------
+# Validation rules for when repo-level settings override org-level settings.
+# Useful for enforcing minimum security standards.
+#
+# Available variables in scripts:
+#   - baseconfig: The organization-level (base) configuration
+#   - overrideconfig: The repository-level (override) configuration
+
+# overridevalidators:
+#   - plugin: branches
+#     error: |
+#       `Branch protection required_approving_review_count cannot be lowered below org baseline`
+#     script: |
+#       if (baseconfig.protection?.required_pull_request_reviews?.required_approving_review_count &&
+#           overrideconfig.protection?.required_pull_request_reviews?.required_approving_review_count) {
+#         return overrideconfig.protection.required_pull_request_reviews.required_approving_review_count >=
+#                baseconfig.protection.required_pull_request_reviews.required_approving_review_count
+#       }
+#       return true

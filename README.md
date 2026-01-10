@@ -415,6 +415,7 @@ npm run test:watch
 
 ```
 ├── safe-settings-handler.js     # Main Lambda handler with smart routing
+├── deployment-settings.yml      # Repository include/exclude configuration
 ├── utils/
 │   └── keyUtils.js              # Private key validation & normalization
 ├── tests/
@@ -426,6 +427,37 @@ npm run test:watch
 ├── Dockerfile                   # Multi-stage Lambda container build
 └── package.json                 # Dependencies & test configuration
 ```
+
+### Repository Configuration
+
+The `deployment-settings.yml` file controls which repositories Safe Settings manages. Customize this file before deploying:
+
+```yaml
+# Repositories to exclude from Safe Settings management
+restrictedRepos:
+  exclude:
+    - admin
+    - .github
+    - safe-settings
+    # Add patterns to exclude groups of repos:
+    # - archived-*
+    # - deprecated-*
+
+  # Repositories to explicitly include (optional)
+  # If specified, ONLY these repositories will be managed
+  # include:
+  #   - api
+  #   - web
+  #   - core-*
+```
+
+**Key features:**
+- **Glob patterns**: Use `*` wildcards (e.g., `test-*` matches `test-api`, `test-web`)
+- **Include mode**: If `include` is specified, only listed repos are managed
+- **Exclude mode**: If only `exclude` is specified, all repos except listed ones are managed
+- **Default exclusions**: Without this file, `admin`, `.github`, and `safe-settings` are excluded
+
+See the [Safe Settings documentation](https://github.com/github/safe-settings) for advanced configuration options including custom validators.
 
 ### Handler Logic
 

@@ -18,6 +18,9 @@ RUN npm install @probot/adapter-aws-lambda-serverless@4.0.3
 # Copy our Lambda handler
 COPY safe-settings-handler.js ${LAMBDA_TASK_ROOT}/
 
+# Copy deployment settings for repository include/exclude configuration
+COPY deployment-settings.yml ${LAMBDA_TASK_ROOT}/
+
 # Add health check for local testing (Lambda ignores this)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "console.log('Health check passed')" || exit 1
